@@ -1,0 +1,961 @@
+
+import config from './config'
+import popup from 'popup'
+
+//common 公共对象函数
+class common{
+	//初始化对象
+	constructor(){
+		this.win=window.top;
+		this.UA=navigator.userAgent;
+		this.isPC=this.UA.indexOf('Windows NT')>-1;
+		this.isAndroid=this.UA.indexOf('Android')>-1;
+		this.isIos=this.UA.indexOf('Mac OS X')>-1;
+		this.isIphone=this.UA.indexOf('iPhone;')>-1;
+		this.isIpad=this.UA.indexOf('iPad;')>-1;
+		this.isIE7=this.UA.indexOf('MSIE 7.0;')>-1;
+		this.isIE8=this.UA.indexOf('MSIE 8.0;')>-1;
+		this.isIE9=this.UA.indexOf('MSIE 9.0;')>-1;
+		this.isIE10=this.UA.indexOf('MSIE 10.0;')>-1;
+		this.isIE11=this.UA.indexOf('Trident')>-1;
+	};
+
+	/*封装的ajax函数
+	*type           	类型  get|post
+	*url            	api地址
+	*data           	请求的json数据
+	*nohideloading  	ajax执行完成之后是否隐藏遮罩
+	*complete       	ajax完成后执行（失败成功后都会执行）
+	*success        	成功之后执行
+	*error          	失败之后执行
+	*goingError     	是否执行自定义error回调
+	*timeout        	ajax超时时间
+	*isGoingLogin   	是否跳转到登录界面
+	*/
+ajax(json){
+		let This=this;
+		let noError=true;
+		let url=null;
+		let asyncVal=typeof(json.async)=='boolean'?json.async:true;
+		This.showLoading();
+		var timeout=setTimeout(function(){
+			This.hideLoading();
+			// 请求超时
+			noError=false;
+			asyncVal&&popup.alert({type:'msg',title:'您的网络太慢了哦,请刷新重试!'});
+		}, json.timeout||config.ajaxtimeout);
+		// 增加时间戳参数
+		if(json.url.indexOf('?')!=-1){
+			url=json.url+'&_='+this.time();
+		}else{
+			url=json.url+'?_='+this.time();
+		};
+		return $.ajax({
+			type: json.type||"post",
+			url: url,
+			data: json.data||"",
+			datatype:"json",
+			async: asyncVal,
+			success:function(data){
+				if(!json.nohideloading){ This.hideLoading();};
+				clearTimeout(timeout);
+				if(typeof(data)=='string'){
+					This.error(JSON.parse(data),json);
+				}else{
+					This.error(data,json);
+				}
+			},
+			complete:function(XMLHttpRequest){
+				if(!json.nohideloading){ This.hideLoading();};
+				clearTimeout(timeout);
+				if(json.complete){json.complete(XMLHttpRequest);}
+			},
+			error:function(XMLHttpRequest){
+				This.hideLoading();
+				clearTimeout(timeout);
+				if(noError){
+					This._error(XMLHttpRequest,json);
+				};	
+			}
+		});
+	};
+
+	//file 文件上传
+	fileAJAX(json){
+		var This=this;
+		var noError=true;
+		$.ajax({
+			type: json.type||"post",
+			url: json.url,
+			xhrFields: {
+			    withCredentials: true
+			},
+			crossDomain: true,
+			data: json.data||"",
+			datatype:"json", 
+            cache: false, 
+            contentType: false,  
+            processData: false, 
+			success:function(data){
+				if(!json.nohideloading){ This.hideLoading();};
+				clearTimeout(time);
+				This.error(data,json);
+			},
+			error:function(XMLHttpRequest){
+				if(!json.nohideloading){ This.hideLoading();};
+				json.error();
+				This.clearTimeout(time);
+				if(noError){
+					_error(XMLHttpRequest,json);
+				};	
+			},
+			complete:function(XMLHttpRequest){
+				if(!json.nohideloading){ This.hideLoading();};
+				clearTimeout(time);
+				if(json.complete){json.complete(XMLHttpRequest);}
+			},
+		});
+		if(json.async==false){return;}
+		var time=setTimeout(function(){
+			This.hideLoading();
+			// 请求超时
+			noError=false;
+			popup.alert({type:'msg',title:'您的网络太慢了哦,请刷新重试!'});
+		}, json.timeout||config.ajaxtimeout);
+	}
+    //获取上传文件后缀  obj为input的jq对象 eg：getFileSuffix($('#expInputFile'))
+    getFileSuffix(obj){
+        var fileSuffix="";
+        if(typeof(fileSuffix) != "undefined"){
+            fileSuffix = $(obj).val().split("\\").pop();
+            fileSuffix=fileSuffix.substring(fileSuffix.lastIndexOf(".")+1,fileSuffix.length);
+        }
+        return fileSuffix;
+    }
+    /*FormData 上传文件函数
+    filename : string  input name 属性
+    onlyOne : boolean   是否只上传一个文件
+    data : Object      ajax上次的data数据
+    url ：string      api地址
+    nohideloading : boolean  	ajax执行完成之后是否隐藏遮罩
+    timeout : number        	ajax超时时间
+    goingError : boolean     	是否执行自定义error回调
+    isGoingLogin : boolean   	是否跳转到登录界面
+    success : function   成功之后的回调函数
+    complete : function       	ajax完成后执行（失败成功后都会执行）
+    error : function          	失败之后执行
+    verifyFileSuffix：boolean 是否验证文件后缀
+    fileSuffixs：string  需要验证的后缀名
+    */
+	cerateFileFormData(json){
+		var This=this;
+		var filename=json.filename?json.filename:'filename'
+		var html='<div id="createFileHtml" class="hidden">';
+				html+='<form enctype="multipart/form-data" id="uploadForm">';
+					html+='<input type="file" name="'+filename+'" id="expInputFile" ';
+						if(!json.onlyOne){ html+=' multiple="multiple"' }
+					html+='></div></form>';
+		if(!$('#createFileHtml').length){
+			$('body').append(html);
+		}
+		$('#expInputFile').click();	
+		$('#expInputFile').one("change",function(){
+            if(json.verifyFileSuffix){
+                var fileSuffix=This.getFileSuffix($('#expInputFile'));
+                if(json.fileSuffixs.indexOf(fileSuffix)==-1){
+                    popup.alert({type:'msg',title:'请选择正确的文件类型!'});
+                    return;
+                }
+            }
+			This.showLoading();
+		    var formData = new FormData($( "#uploadForm" )[0]); 
+		    if(json.data){
+			    for(var i in json.data){
+			    	formData.append(i, json.data[i]);
+			    };
+		    };
+		    This.fileAJAX({
+		    	url:json.url,
+		    	data:formData,
+		    	success:function(data){
+		    		$('#createFileHtml').remove();
+		    		json.success&&json.success(data);
+		    	},
+		    	error:function(data){
+		    		$('#createFileHtml').remove();
+		    		json.error&&json.error(data);
+		    	},
+		    	complete:function(data){
+		    		json.complete&&json.complete(data);
+		    	}
+		    });
+		});
+	}
+
+	//error 处理函数
+	error(data,json){
+		//判断code 并处理
+		var dataCode=parseInt(data.code);
+		if(!json.isGoingLogin && dataCode==1003){
+			//判断app或者web
+			if(window.location.href.indexOf(config.loginUrl) == -1){
+				location.href=config.loginUrl+'?redirecturl='+encodeURIComponent(location.href);
+			}else{
+				popup.alert({type:'msg',title:'用户未登陆,请登录!'});
+			}
+		}else{
+			switch(dataCode){
+				case 1000:
+					json.success && json.success(data);
+					break;
+				default:
+					if(json.goingError){
+						//走error回调
+						json.error && json.error(data);
+					}else{
+						//直接弹出错误信息
+						popup.alert({type:'msg',title:data.desc});
+					};	
+			}
+		};
+	}
+
+	// _error 处理函数
+	_error(XMLHttpRequest,json){
+		this.hideLoading();
+			if(json.code){
+				json.error(JSON.parse(XMLHttpRequest.responseText));
+			}else{
+				switch(XMLHttpRequest.status){
+					// case 401:
+					// 	if(window.location.href.indexOf(config.loginUrl) == -1){ 
+					// 		sessionStorage.setItem("weixin-url", window.location.href); //记录没有登陆前的访问页面
+					// 		// window.location.href=config.loginUrl;
+					// 	}else{
+					// 		popup.alert({type:'msg',title:"你需要登录哦"});
+					// 	};
+					// 	break;
+					case 400:
+						popup.alert({type:'msg',title:"您的请求不合法呢"});
+						break;	
+					case 404:
+						popup.alert({type:'msg',title:"访问的地址可能不存在哦"});
+						break;		
+					case 500:case 502:
+						popup.alert({type:'msg',title:"服务器内部错误"});
+						break;		
+					// default:
+					// 	popup.alert({type:'msg',title:"未知错误。程序员欧巴正在赶来修改哦"});	
+				}
+			}
+	}
+
+	// 获取当前时间毫秒
+	time(){
+		return new Date().getTime();
+	}
+
+	/*根据参数生成常用的正则表达式
+	*string    type 生成的正则表达式类型
+	*array     numArr 生成正则的条件数组 例如:[6,16] 也可省略
+	*/
+	regCombination(type,numArr){
+		var reg="";
+		switch(type){
+			case "*":     //"*":"不能为空！"   
+				if(numArr){
+					reg=new RegExp("^[\\w\\W]{"+numArr[0]+","+numArr[1]+"}$"); 
+				}else {
+					reg=new RegExp("^[\\w\\W]+$"); 
+				}  
+				break;
+			case "n":    //"number":"请填写数字！
+				if(numArr){
+					reg=new RegExp("^\\d{"+numArr[0]+","+numArr[1]+"}$");
+				}else{
+					reg=new RegExp("^\\d+$");
+				}
+				break;
+			case "s":  //"s":"不能输入特殊字符！"   
+				if(numArr){
+					reg=new RegExp("^[\\u4E00-\\u9FA5\\uf900-\\ufa2d\\w\\.\\s]{"+numArr[0]+","+numArr[1]+"}$");
+				}else{
+					reg=new RegExp("^[\\u4E00-\\u9FA5\\uf900-\\ufa2d\\w\\.\\s]+$");
+				}
+				break; 
+			case "c":  //"z":"中文验证" 
+				reg=new RegExp("^[\\u4E00-\\u9FA5\\uf900-\\ufa2d]{"+numArr[0]+","+numArr[1]+"}$");
+				break;	
+			case "p":    //"p":"邮政编码！
+				reg=new RegExp("^[0-9]{6}$");
+				break;	
+			case "m":    //"m":"写手机号码！"
+				reg=new RegExp("^13[0-9]{9}$|14[0-9]{9}$|15[0-9]{9}$|17[0-9]{9}$|18[0-9]{9}$");
+				break;	
+			case "e":   //"e":"邮箱地址格式
+				reg=new RegExp("^\\w+([-+.']\\w+)*@\\w+([-.]\\w+)*\\.\\w+([-.]\\w+)*$");
+				break;
+			case "id":   //"id":验证身份证
+				reg=new RegExp("^\\d{17}[\\dXx]|\\d{14}[\\dXx]$");
+				break;
+			case "money": //钱
+				reg=new RegExp("^[\\d\\.]+$");	
+				break;	
+			case "url":   //"url":"网址"
+				reg=new RegExp("^(\\w+:\\/\\/)?\\w+(\\.\\w+)+.*$");
+				break;	
+			case "u":    //
+				reg=new RegExp("^[A-Z\\d]+$");
+				break;
+		}
+		return reg;
+	}
+
+	/*extent json函数
+	*json1  原始数据
+	*json2  新数据 
+	*/
+	extend (json1,json2){
+		var newJson=json1;
+		for(var j in json2){
+			newJson[j]=json2[j];
+		}
+		return newJson;
+	}
+
+	/* 设置url参数
+	*name    设置的query名字
+	*value   值
+	*url     设置的url （location.href）
+	*isHashMode 是否是hash
+	*/
+	setQueryString(name,value,url,isHashMode){
+	    if(typeof name == 'undefined' || typeof value == 'undefined' || typeof url == 'undefined'){
+	        return url;
+	    }
+	    var reg = new RegExp("(^|&|\\?|#)"+name+"=([^&]*?)(&|#|$)"),
+	        tempHash=url.match(/#.*/)?url.match(/#.*/)[0]:"";
+	    
+	    url=url.replace(/#.*/,"");
+	    if(isHashMode===true){
+	        if(reg.test(tempHash)){
+	            tempHash=tempHash.replace(reg,function(m,r1,r2,r3){return r1+name+"="+encodeURIComponent(value)+r3});
+	        }else{
+	            var separator=tempHash.indexOf("#")===-1?"#":"&";
+	            tempHash=tempHash+separator+name+"="+encodeURIComponent(value)}
+	            tempHash=tempHash.replace(reg,function(m,r1,r2,r3){return r1+name+"="+encodeURIComponent(value)+r3})
+	    }else if(reg.test(url)){
+	        url=url.replace(reg,function(m,r1,r2,r3){return r1+name+"="+encodeURIComponent(value)+r3});
+	    }else{
+	        var separator=url.indexOf("?")===-1?"?":"&";
+	        url=url+separator+name+"="+encodeURIComponent(value)
+	    }
+	    return url+tempHash
+	};
+
+	/*检查输入的是否是数字*/
+	IsNum (e) {
+	    var k = window.event ? e.keyCode : e.which;
+	    if (((k >= 48) && (k <= 57)) || k == 8 || k == 0) {
+	    } else {
+	        if (window.event) {
+	            window.event.returnValue = false;
+	        }
+	        else {
+	            e.preventDefault(); //for firefox 
+	        }
+	    }
+	} 
+
+	/*获取 storage 缓存数据
+	* type  类型   local：localStorage   session：sessionStorage
+	* name  缓存数据name名
+	*/
+   	getStorage(type,name){
+   		var type=type||'local';
+   		if(type=='local'){
+   			var result = localStorage.getItem(name)? localStorage.getItem(name):"";
+   		}else if(type=='session'){
+   			var result = sessionStorage.getItem(name)? sessionStorage.getItem(name):"";
+   		}
+	    return result;
+ 	}
+
+ 	/*设置 storage 缓存数据
+ 	*type  类型   local：localStorage   session：sessionStorage
+ 	*name  缓存数据name名
+ 	*content  缓存的数据内容
+ 	*/
+	setStorage(type,name,content){
+		var type=type||'local';
+		var data=content;
+		if(typeof(data)=='object'){ data=JSON.stringify(content) };
+		if(type=='local'){
+			localStorage.setItem(name,data);
+		}else if(type=='session'){
+			sessionStorage.setItem(name,data);
+		}
+	}
+
+	//showLoading
+	showLoading(){
+		$('#loading').stop().fadeIn(200);
+	}
+
+	//hideLoading
+	hideLoading(){
+		$('#loading').stop().fadeOut(200);
+	}
+
+	/*生成随机字符串*/
+	randomString(len) {
+	　　len = len || 32;
+	　　var $chars = 'ABCDEFGHJKMNPQRSTWXYZabcdefhijkmnprstwxyz2345678';    /****默认去掉了容易混淆的字符oOLl,9gq,Vv,Uu,I1****/
+	　　var maxPos = $chars.length;
+	　　var pwd = '';
+	　　for (i = 0; i < len; i++) {
+	　　　　pwd += $chars.charAt(Math.floor(Math.random() * maxPos));
+	　　}
+	　　return pwd;
+	}
+
+	//秒数换算成时间函数 得到00:00:00 格式
+	formatSeconds(value) {
+	    var second = parseInt(value);// 秒
+	    var minute = 0;// 分
+	    var hour = 0;// 小时
+	    if(second > 60) {
+	            minute = parseInt(second/60);
+	            second = parseInt(second%60);
+	        if(minute > 60) {
+	            hour = parseInt(minute/60);
+	            minute = parseInt(minute%60);
+	        }
+	    }
+	    var result = this.getZero(minute)+':'+this.getZero(parseInt(second));
+	    if(minute > 0) {
+	        result =this.getZero(parseInt(minute))+":"+this.getZero(parseInt(second));
+	    }
+	    if(hour > 0) {
+	        result =this.getZero(parseInt(hour))+':'+this.getZero(parseInt(minute))+":"+this.getZero(parseInt(second));
+	    }
+	    return result;
+	}
+
+	/*判断时间前面是否加0*/
+	getZero (num){
+	    if(num<10){
+	            return '0'+num;
+	    }else{
+	            return num;
+	    }
+	}
+
+	/* 短信定时器
+      nowTime vue.js 初始数据  当前时间
+      getMsgText vue.js 初始数据  当前的提示文字
+    */
+    getMsgTime(obj,msgText, fn) {
+        var This = obj;
+        This.nowTime = config.msgTime;
+        var timer = setInterval(function() {
+            This.nowTime--;
+            This[msgText] = This.nowTime + ' S后重发';
+            //时间走完时执行
+            if (This.nowTime <= 0) {
+                clearInterval(timer);
+                This[msgText] = "重新获取";
+                fn();
+            }
+        }, 1000);
+    } //end
+
+    /*根据某个val值获得当前数组的索引
+	arr  数组集合（一维json数组）
+	key  json的key值
+	val  需要匹配的值
+    */
+	gttArrItemIndex(arr,key,val){
+		var index=-1;
+		for(var i=0,len=arr.length;i<len;i++){
+			if(arr[i][key]==val){
+				index=i;
+			}
+		}
+		return index;
+	}
+
+	/*检测某值在数组中是否存在
+	arr   数组集合（一维json数组）
+	value 需要匹配的值
+	*/
+	isInArray(arr,value){
+		if(!value){return false;}
+		var result=false;
+		for(var i=0,len=arr.length;i<len;i++){
+			if(value.toString().indexOf(arr[i]) != -1){
+				result=true;
+			};
+		};
+		return result;
+	}
+
+	/*检测某值在数组中是否存在 并返回存在的索引值
+	arr         数组集合（一维json数组） 
+	value       json的key值 
+	checkKey    检测的key值
+	*/
+	isInArrayAndIndex(arr,value,checkKey){
+		var result={isin:false,index:0};
+		for(var i=0,len=arr.length;i<len;i++){
+			if(value.indexOf(arr[i][checkKey]) != -1){
+				result.isin=true;
+				result.index=i;
+			};
+		};
+		return result;
+	}
+
+		/*检测某值在数组中是否存在 并返回存在的索引值*/
+	isInArrayAndIndexCopy(arr,value,checkKey){
+		var result={isin:false,index:0};
+		for(var i=0,len=arr.length;i<len;i++){
+			if(value==arr[i][checkKey]){
+				result.isin=true;
+				result.index=i;
+			};
+		};
+		return result;
+	}
+
+	/*json数组中获得某个kye的集合
+	datas   array   数组集合（一维json数组） 
+	keys    array     key值集合  例如['id','name','age']
+	*/
+	getValListForJson(json){
+		var newArr=[];
+		for(var i=0;i<json.datas.length;i++){
+			var newjson={};
+			for(var k=0;k<json.keys.length;k++){
+				newjson[json.keys[k]]=json.datas[i][json.keys[k]]
+			}
+			newArr.push(newjson);
+		}
+		return newArr;
+	}
+
+	/*获得数组中某个key值的集合
+	arr  数组集合（一维json数组）
+	key  string 
+	*/
+	getArrsItems(arr,key){
+	    var str="";
+	    for(var i=0;i<arr.length;i++){
+	        str+=arr[i][key]+',';
+	    }
+	    return str.slice(0,-1);
+	}
+
+	/*获得某value值相加的和     （算总价时需要用到）
+	arr  数组集合（一维json数组）
+	key  string
+	*/
+	getTotalDatas(arr,key){
+	    var total=0;
+	    for(var i=0;i<arr.length;i++){
+	        total=total+arr[i][key];
+	    }
+	    return total;
+	}
+
+	/*获得商品数量少于number的索引集合 并返回index
+	arr      数组集合（一维json数组）
+	key      string
+	number   int
+	*/
+	getNumberZeroProducts(arr,key,number){
+		var newarr=[];
+		for(var i=0,len=arr.length;i<len;i++){
+			if(arr[i][key]<=number){
+				newarr.push(i);
+			};
+		}
+		return newarr
+	};
+
+	/*获得某些key值的集合
+	datas  array  数组集合（一维json数组）
+	keys   array  （['id','name','age']） 
+	*/
+	getNumListDouHao(json){
+		var str="";
+		for(var i=0;i<json.datas.length;i++){
+			if(i==json.datas.length-1){
+				for(var k=0;k<json.keys.length;k++){
+					if(k==json.keys.length-1){
+						str+=json.datas[i][json.keys[k]];
+					}else{
+						str+=json.datas[i][json.keys[k]]+',';
+					}
+				}
+			}else{
+				for(var k=0;k<json.keys.length;k++){
+					if(k==json.keys.length-1){
+						str+=json.datas[i][json.keys[k]];
+					}else{
+						str+=json.datas[i][json.keys[k]]+',';	
+					}
+				}
+				str+='\n';
+			}
+		}
+		return str;
+	}
+
+	//新建iframe 并赋src   文件下载时用得到
+    interIosForIframe(src) {
+        if ($('#clickOnIos').length) {
+            $('#clickOnIos').attr('src', src)
+        } else {
+            $('body').append('<iframe id="clickOnIos" src=' + src + ' class="hide"></iframe>');
+        }
+    };
+
+    //通过某个key的value值去筛选新的json
+    /*
+    * 使用方法： var ischeck = common.getkeytwo(_this.treatise,'isChecked',true);
+    * 从treatise查找ischecked = true的数据   */
+    getkeytwo(arr,key,value){
+        var newarr = {}
+        for(var i in arr) {
+            if(arr[i][key] == value) {
+                newarr=arr[i];
+            }
+        }
+        return newarr;
+    };
+
+ //    // 获取所有地址信息
+	// callback 回调函数
+	getAllAdress(callback){
+		var that = this
+		if(window.localStorage && window.localStorage.getItem("qmx_all_address")){
+			callback && typeof callback == "function" && callback(JSON.parse(window.localStorage.getItem("qmx_all_address")))
+		}else{
+			that.ajax({
+				url : config.baseApi + "scm-purchase/api/purchare/getAllAddress",
+				success : function(data){
+					window.localStorage && window.localStorage.setItem("qmx_all_address", JSON.stringify(data.data))
+					callback && typeof callback == "function" && callback(data.data)
+				}
+			})
+		}
+	};
+
+
+	// // 获取所有省份的信息
+	// // callback 回调函数
+	getAllProvince(callback){
+		var that = this
+		that.ajax({
+			url : config.baseApi + "scm-purchase/api/purchare/getAllProvence",
+			success : function(data){
+				callback && typeof callback == "function" && callback(data.data)
+			}
+		})
+	};
+
+	// // 根据省份获取市信息
+	// // pid 省份ID callback 回调函数
+	getCityByProvenceId(pid, callback){
+		var that = this
+		if(!pid){
+			return false
+		}
+		that.ajax({
+			type : "post",
+            async:false,
+			data : {
+				provenceId : pid
+			},
+			url : config.baseApi + "scm-purchase/api/purchare/getCityByProvenceId",
+			success : function(data){
+				callback && typeof callback == "function" && callback(data.data)
+			}
+		})
+	};
+
+	// // 根据市获取区的信息
+	// // cid 市Id callback 回调函数
+	getDistrictByCityId(cid, callback){
+		var that = this
+		if(!cid){
+			return false
+		}
+		that.ajax({
+			type : "post",
+			data : {
+                cityId : cid
+			},
+			url : config.baseApi + "scm-purchase/api/purchare/getDistrictByCityId",
+			success : function(data){
+				callback && typeof callback == "function" && callback(data.data)
+			}
+		})
+	};
+
+    //登录成功之后设置cookie
+	setCookie(cookiename,value){
+		var dt= new Date();
+  		dt.setTime(dt.getTime() + (3*24*60*60*1000));
+        // $.cookie(cookiename,value,{expires:dt, path:'/' ,domain: 'morning-star.cn'});
+        $.cookie(cookiename,value,{expires:dt, path:'/'});
+	}
+
+	//退出登录后移除cookie
+	removeCookie(cookiename){
+		// $.cookie(cookiename,"",{expires:-1, path:'/' ,domain: 'morning-star.cn'});
+		$.cookie(cookiename,"",{expires:-1, path:'/' });
+		sessionStorage.setItem('usermsgs',"");
+	};
+
+	//订单倒计时定时器
+	/*	invalidtime    //过期时间
+	**	systemtime  //系统当前时间
+	**	obj  //操作的对象
+	**	callback   //回调函数
+	*/
+	timeCountDown(json){
+		var This=this;
+        var timespe = (json.invalidtime - json.systemtime) / 1000; //时间差
+        if (timespe <= 0) { json.obj.text('00:00:00'); };
+        var timer = setInterval(function() {
+        	$(json.obj).text(This.formatSeconds(timespe));
+            timespe--;
+            if (timespe <= 0) {
+                clearInterval(timer);
+                json.obj.text('00:00:00');
+                //调起事件
+                json.callback&&json.callback();
+            }
+        }, 1000);
+	};
+	/*向json数组里面添加一个字段
+	 arr 需要push的arr json数组
+	 pushps:[{key:'name',val:125}]  第一层push的数据
+	 deeplevel  是否有更深栏目需要push 有就传下面的参数
+	 listkey    需要push的二层数据key名字
+	 pushcs:[{key:'name',val:125}] 第二层push的数据
+	 */
+	pushKeVaInArr(json){
+		for(var i=0,len=json.arr.length;i<len;i++){
+			for(var k=0;k<json.pushps.length;k++){
+				json.arr[i][json.pushps[k]['key']]=json.pushps[k]['val']
+			}
+			if(json.deeplevel){
+				for(var j=0,lenj=json.arr[i][json.listkey].length;j<lenj;j++){
+					for(var o=0;o<json.pushcs.length;o++){
+						json.arr[i][json.listkey][j][json.pushcs[o]['key']]=json.pushcs[o]['val']
+					};
+				}
+			}
+		}
+		return json.arr;
+	}
+	//验证手机
+	verifyMobile(m) {
+		var mobile = new RegExp("^13[0-9]{9}$|14[0-9]{9}$|15[0-9]{9}$|17[0-9]{9}$|18[0-9]{9}$");
+		return mobile.test(m)
+	}
+	//验证座机
+	verifyPhone(p) {
+		var phone = /^(0\d{2,3}-?)?\d{7,8}$/;
+		return phone.test(p)
+	}
+	//验证手机或座机
+	verifyPhoneAndMobile(p) {
+		var phone = /(\d{2,5}-\d{7,8})/;
+		var mobile = new RegExp("^13[0-9]{9}$|14[0-9]{9}$|15[0-9]{9}$|17[0-9]{9}$|18[0-9]{9}$");
+		return phone.test(p) || mobile.test(p);
+	}
+	//验证国外手机或座机
+	verifyForeignPhoneAndMobile(p) {
+		var phone = /^[\d,-]{0,25}$/;
+		return phone.test(p);
+	}
+	//验证邮件 reg=new RegExp("^[0-9]{6}$");
+	verifyEmail(p) {
+		var email = new RegExp("^\\w+([-+.']\\w+)*@\\w+([-.]\\w+)*\\.\\w+([-.]\\w+)*$");
+		return email.test(p)
+	}
+	//验证邮编  /^\d{16}|\d{19}$/
+	verifyPostcode(p) {
+		var reg = new RegExp("^[0-9]{6}$");
+		return reg.test(p)
+	}
+	//验证银行卡  /^\d{16}|\d{19}$/
+	verifyBankCard(num) {
+		var reg = /^\d{16}|\d{19}$/;
+		return reg.test(num)
+	}
+
+	/*根据字符串首汉字查询拼音*/
+	hanziToPinyin(string){
+				// 汉字拼音首字母列表 本列表包含了20902个汉字,用于配合 ToChineseSpell
+		//函数使用,本表收录的字符的Unicode编码范围为19968至40869, XDesigner 整理
+		var strChineseFirstPY = "YDYQSXMWZSSXJBYMGCCZQPSSQBYCDSCDQLDYLYBSSJGYZZJJFKCCLZDHWDWZJLJPFYYNWJJTMYHZWZHFLZPPQHGSCYYYNJQYXXGJHHSDSJNKKTMOMLCRXYPSNQSECCQZGGLLYJLMYZZSECYKYYHQWJSSGGYXYZYJWWKDJHYCHMYXJTLXJYQBYXZLDWRDJRWYSRLDZJPCBZJJBRCFTLECZSTZFXXZHTRQHYBDLYCZSSYMMRFMYQZPWWJJYFCRWFDFZQPYDDWYXKYJAWJFFXYPSFTZYHHYZYSWCJYXSCLCXXWZZXNBGNNXBXLZSZSBSGPYSYZDHMDZBQBZCWDZZYYTZHBTSYYBZGNTNXQYWQSKBPHHLXGYBFMJEBJHHGQTJCYSXSTKZHLYCKGLYSMZXYALMELDCCXGZYRJXSDLTYZCQKCNNJWHJTZZCQLJSTSTBNXBTYXCEQXGKWJYFLZQLYHYXSPSFXLMPBYSXXXYDJCZYLLLSJXFHJXPJBTFFYABYXBHZZBJYZLWLCZGGBTSSMDTJZXPTHYQTGLJSCQFZKJZJQNLZWLSLHDZBWJNCJZYZSQQYCQYRZCJJWYBRTWPYFTWEXCSKDZCTBZHYZZYYJXZCFFZZMJYXXSDZZOTTBZLQWFCKSZSXFYRLNYJMBDTHJXSQQCCSBXYYTSYFBXDZTGBCNSLCYZZPSAZYZZSCJCSHZQYDXLBPJLLMQXTYDZXSQJTZPXLCGLQTZWJBHCTSYJSFXYEJJTLBGXSXJMYJQQPFZASYJNTYDJXKJCDJSZCBARTDCLYJQMWNQNCLLLKBYBZZSYHQQLTWLCCXTXLLZNTYLNEWYZYXCZXXGRKRMTCNDNJTSYYSSDQDGHSDBJGHRWRQLYBGLXHLGTGXBQJDZPYJSJYJCTMRNYMGRZJCZGJMZMGXMPRYXKJNYMSGMZJYMKMFXMLDTGFBHCJHKYLPFMDXLQJJSMTQGZSJLQDLDGJYCALCMZCSDJLLNXDJFFFFJCZFMZFFPFKHKGDPSXKTACJDHHZDDCRRCFQYJKQCCWJDXHWJLYLLZGCFCQDSMLZPBJJPLSBCJGGDCKKDEZSQCCKJGCGKDJTJDLZYCXKLQSCGJCLTFPCQCZGWPJDQYZJJBYJHSJDZWGFSJGZKQCCZLLPSPKJGQJHZZLJPLGJGJJTHJJYJZCZMLZLYQBGJWMLJKXZDZNJQSYZMLJLLJKYWXMKJLHSKJGBMCLYYMKXJQLBMLLKMDXXKWYXYSLMLPSJQQJQXYXFJTJDXMXXLLCXQBSYJBGWYMBGGBCYXPJYGPEPFGDJGBHBNSQJYZJKJKHXQFGQZKFHYGKHDKLLSDJQXPQYKYBNQSXQNSZSWHBSXWHXWBZZXDMNSJBSBKBBZKLYLXGWXDRWYQZMYWSJQLCJXXJXKJEQXSCYETLZHLYYYSDZPAQYZCMTLSHTZCFYZYXYLJSDCJQAGYSLCQLYYYSHMRQQKLDXZSCSSSYDYCJYSFSJBFRSSZQSBXXPXJYSDRCKGJLGDKZJZBDKTCSYQPYHSTCLDJDHMXMCGXYZHJDDTMHLTXZXYLYMOHYJCLTYFBQQXPFBDFHHTKSQHZYYWCNXXCRWHOWGYJLEGWDQCWGFJYCSNTMYTOLBYGWQWESJPWNMLRYDZSZTXYQPZGCWXHNGPYXSHMYQJXZTDPPBFYHZHTJYFDZWKGKZBLDNTSXHQEEGZZYLZMMZYJZGXZXKHKSTXNXXWYLYAPSTHXDWHZYMPXAGKYDXBHNHXKDPJNMYHYLPMGOCSLNZHKXXLPZZLBMLSFBHHGYGYYGGBHSCYAQTYWLXTZQCEZYDQDQMMHTKLLSZHLSJZWFYHQSWSCWLQAZYNYTLSXTHAZNKZZSZZLAXXZWWCTGQQTDDYZTCCHYQZFLXPSLZYGPZSZNGLNDQTBDLXGTCTAJDKYWNSYZLJHHZZCWNYYZYWMHYCHHYXHJKZWSXHZYXLYSKQYSPSLYZWMYPPKBYGLKZHTYXAXQSYSHXASMCHKDSCRSWJPWXSGZJLWWSCHSJHSQNHCSEGNDAQTBAALZZMSSTDQJCJKTSCJAXPLGGXHHGXXZCXPDMMHLDGTYBYSJMXHMRCPXXJZCKZXSHMLQXXTTHXWZFKHCCZDYTCJYXQHLXDHYPJQXYLSYYDZOZJNYXQEZYSQYAYXWYPDGXDDXSPPYZNDLTWRHXYDXZZJHTCXMCZLHPYYYYMHZLLHNXMYLLLMDCPPXHMXDKYCYRDLTXJCHHZZXZLCCLYLNZSHZJZZLNNRLWHYQSNJHXYNTTTKYJPYCHHYEGKCTTWLGQRLGGTGTYGYHPYHYLQYQGCWYQKPYYYTTTTLHYHLLTYTTSPLKYZXGZWGPYDSSZZDQXSKCQNMJJZZBXYQMJRTFFBTKHZKBXLJJKDXJTLBWFZPPTKQTZTGPDGNTPJYFALQMKGXBDCLZFHZCLLLLADPMXDJHLCCLGYHDZFGYDDGCYYFGYDXKSSEBDHYKDKDKHNAXXYBPBYYHXZQGAFFQYJXDMLJCSQZLLPCHBSXGJYNDYBYQSPZWJLZKSDDTACTBXZDYZYPJZQSJNKKTKNJDJGYYPGTLFYQKASDNTCYHBLWDZHBBYDWJRYGKZYHEYYFJMSDTYFZJJHGCXPLXHLDWXXJKYTCYKSSSMTWCTTQZLPBSZDZWZXGZAGYKTYWXLHLSPBCLLOQMMZSSLCMBJCSZZKYDCZJGQQDSMCYTZQQLWZQZXSSFPTTFQMDDZDSHDTDWFHTDYZJYQJQKYPBDJYYXTLJHDRQXXXHAYDHRJLKLYTWHLLRLLRCXYLBWSRSZZSYMKZZHHKYHXKSMDSYDYCJPBZBSQLFCXXXNXKXWYWSDZYQOGGQMMYHCDZTTFJYYBGSTTTYBYKJDHKYXBELHTYPJQNFXFDYKZHQKZBYJTZBXHFDXKDASWTAWAJLDYJSFHBLDNNTNQJTJNCHXFJSRFWHZFMDRYJYJWZPDJKZYJYMPCYZNYNXFBYTFYFWYGDBNZZZDNYTXZEMMQBSQEHXFZMBMFLZZSRXYMJGSXWZJSPRYDJSJGXHJJGLJJYNZZJXHGXKYMLPYYYCXYTWQZSWHWLYRJLPXSLSXMFSWWKLCTNXNYNPSJSZHDZEPTXMYYWXYYSYWLXJQZQXZDCLEEELMCPJPCLWBXSQHFWWTFFJTNQJHJQDXHWLBYZNFJLALKYYJLDXHHYCSTYYWNRJYXYWTRMDRQHWQCMFJDYZMHMYYXJWMYZQZXTLMRSPWWCHAQBXYGZYPXYYRRCLMPYMGKSJSZYSRMYJSNXTPLNBAPPYPYLXYYZKYNLDZYJZCZNNLMZHHARQMPGWQTZMXXMLLHGDZXYHXKYXYCJMFFYYHJFSBSSQLXXNDYCANNMTCJCYPRRNYTYQNYYMBMSXNDLYLYSLJRLXYSXQMLLYZLZJJJKYZZCSFBZXXMSTBJGNXYZHLXNMCWSCYZYFZLXBRNNNYLBNRTGZQYSATSWRYHYJZMZDHZGZDWYBSSCSKXSYHYTXXGCQGXZZSHYXJSCRHMKKBXCZJYJYMKQHZJFNBHMQHYSNJNZYBKNQMCLGQHWLZNZSWXKHLJHYYBQLBFCDSXDLDSPFZPSKJYZWZXZDDXJSMMEGJSCSSMGCLXXKYYYLNYPWWWGYDKZJGGGZGGSYCKNJWNJPCXBJJTQTJWDSSPJXZXNZXUMELPXFSXTLLXCLJXJJLJZXCTPSWXLYDHLYQRWHSYCSQYYBYAYWJJJQFWQCQQCJQGXALDBZZYJGKGXPLTZYFXJLTPADKYQHPMATLCPDCKBMTXYBHKLENXDLEEGQDYMSAWHZMLJTWYGXLYQZLJEEYYBQQFFNLYXRDSCTGJGXYYNKLLYQKCCTLHJLQMKKZGCYYGLLLJDZGYDHZWXPYSJBZKDZGYZZHYWYFQYTYZSZYEZZLYMHJJHTSMQWYZLKYYWZCSRKQYTLTDXWCTYJKLWSQZWBDCQYNCJSRSZJLKCDCDTLZZZACQQZZDDXYPLXZBQJYLZLLLQDDZQJYJYJZYXNYYYNYJXKXDAZWYRDLJYYYRJLXLLDYXJCYWYWNQCCLDDNYYYNYCKCZHXXCCLGZQJGKWPPCQQJYSBZZXYJSQPXJPZBSBDSFNSFPZXHDWZTDWPPTFLZZBZDMYYPQJRSDZSQZSQXBDGCPZSWDWCSQZGMDHZXMWWFYBPDGPHTMJTHZSMMBGZMBZJCFZWFZBBZMQCFMBDMCJXLGPNJBBXGYHYYJGPTZGZMQBQTCGYXJXLWZKYDPDYMGCFTPFXYZTZXDZXTGKMTYBBCLBJASKYTSSQYYMSZXFJEWLXLLSZBQJJJAKLYLXLYCCTSXMCWFKKKBSXLLLLJYXTYLTJYYTDPJHNHNNKBYQNFQYYZBYYESSESSGDYHFHWTCJBSDZZTFDMXHCNJZYMQWSRYJDZJQPDQBBSTJGGFBKJBXTGQHNGWJXJGDLLTHZHHYYYYYYSXWTYYYCCBDBPYPZYCCZYJPZYWCBDLFWZCWJDXXHYHLHWZZXJTCZLCDPXUJCZZZLYXJJTXPHFXWPYWXZPTDZZBDZCYHJHMLXBQXSBYLRDTGJRRCTTTHYTCZWMXFYTWWZCWJWXJYWCSKYBZSCCTZQNHXNWXXKHKFHTSWOCCJYBCMPZZYKBNNZPBZHHZDLSYDDYTYFJPXYNGFXBYQXCBHXCPSXTYZDMKYSNXSXLHKMZXLYHDHKWHXXSSKQYHHCJYXGLHZXCSNHEKDTGZXQYPKDHEXTYKCNYMYYYPKQYYYKXZLTHJQTBYQHXBMYHSQCKWWYLLHCYYLNNEQXQWMCFBDCCMLJGGXDQKTLXKGNQCDGZJWYJJLYHHQTTTNWCHMXCXWHWSZJYDJCCDBQCDGDNYXZTHCQRXCBHZTQCBXWGQWYYBXHMBYMYQTYEXMQKYAQYRGYZSLFYKKQHYSSQYSHJGJCNXKZYCXSBXYXHYYLSTYCXQTHYSMGSCPMMGCCCCCMTZTASMGQZJHKLOSQYLSWTMXSYQKDZLJQQYPLSYCZTCQQPBBQJZCLPKHQZYYXXDTDDTSJCXFFLLCHQXMJLWCJCXTSPYCXNDTJSHJWXDQQJSKXYAMYLSJHMLALYKXCYYDMNMDQMXMCZNNCYBZKKYFLMCHCMLHXRCJJHSYLNMTJZGZGYWJXSRXCWJGJQHQZDQJDCJJZKJKGDZQGJJYJYLXZXXCDQHHHEYTMHLFSBDJSYYSHFYSTCZQLPBDRFRZTZYKYWHSZYQKWDQZRKMSYNBCRXQBJYFAZPZZEDZCJYWBCJWHYJBQSZYWRYSZPTDKZPFPBNZTKLQYHBBZPNPPTYZZYBQNYDCPJMMCYCQMCYFZZDCMNLFPBPLNGQJTBTTNJZPZBBZNJKLJQYLNBZQHKSJZNGGQSZZKYXSHPZSNBCGZKDDZQANZHJKDRTLZLSWJLJZLYWTJNDJZJHXYAYNCBGTZCSSQMNJPJYTYSWXZFKWJQTKHTZPLBHSNJZSYZBWZZZZLSYLSBJHDWWQPSLMMFBJDWAQYZTCJTBNNWZXQXCDSLQGDSDPDZHJTQQPSWLYYJZLGYXYZLCTCBJTKTYCZJTQKBSJLGMGZDMCSGPYNJZYQYYKNXRPWSZXMTNCSZZYXYBYHYZAXYWQCJTLLCKJJTJHGDXDXYQYZZBYWDLWQCGLZGJGQRQZCZSSBCRPCSKYDZNXJSQGXSSJMYDNSTZTPBDLTKZWXQWQTZEXNQCZGWEZKSSBYBRTSSSLCCGBPSZQSZLCCGLLLZXHZQTHCZMQGYZQZNMCOCSZJMMZSQPJYGQLJYJPPLDXRGZYXCCSXHSHGTZNLZWZKJCXTCFCJXLBMQBCZZWPQDNHXLJCTHYZLGYLNLSZZPCXDSCQQHJQKSXZPBAJYEMSMJTZDXLCJYRYYNWJBNGZZTMJXLTBSLYRZPYLSSCNXPHLLHYLLQQZQLXYMRSYCXZLMMCZLTZSDWTJJLLNZGGQXPFSKYGYGHBFZPDKMWGHCXMSGDXJMCJZDYCABXJDLNBCDQYGSKYDQTXDJJYXMSZQAZDZFSLQXYJSJZYLBTXXWXQQZBJZUFBBLYLWDSLJHXJYZJWTDJCZFQZQZZDZSXZZQLZCDZFJHYSPYMPQZMLPPLFFXJJNZZYLSJEYQZFPFZKSYWJJJHRDJZZXTXXGLGHYDXCSKYSWMMZCWYBAZBJKSHFHJCXMHFQHYXXYZFTSJYZFXYXPZLCHMZMBXHZZSXYFYMNCWDABAZLXKTCSHHXKXJJZJSTHYGXSXYYHHHJWXKZXSSBZZWHHHCWTZZZPJXSNXQQJGZYZYWLLCWXZFXXYXYHXMKYYSWSQMNLNAYCYSPMJKHWCQHYLAJJMZXHMMCNZHBHXCLXTJPLTXYJHDYYLTTXFSZHYXXSJBJYAYRSMXYPLCKDUYHLXRLNLLSTYZYYQYGYHHSCCSMZCTZQXKYQFPYYRPFFLKQUNTSZLLZMWWTCQQYZWTLLMLMPWMBZSSTZRBPDDTLQJJBXZCSRZQQYGWCSXFWZLXCCRSZDZMCYGGDZQSGTJSWLJMYMMZYHFBJDGYXCCPSHXNZCSBSJYJGJMPPWAFFYFNXHYZXZYLREMZGZCYZSSZDLLJCSQFNXZKPTXZGXJJGFMYYYSNBTYLBNLHPFZDCYFBMGQRRSSSZXYSGTZRNYDZZCDGPJAFJFZKNZBLCZSZPSGCYCJSZLMLRSZBZZLDLSLLYSXSQZQLYXZLSKKBRXBRBZCYCXZZZEEYFGKLZLYYHGZSGZLFJHGTGWKRAAJYZKZQTSSHJJXDCYZUYJLZYRZDQQHGJZXSSZBYKJPBFRTJXLLFQWJHYLQTYMBLPZDXTZYGBDHZZRBGXHWNJTJXLKSCFSMWLSDQYSJTXKZSCFWJLBXFTZLLJZLLQBLSQMQQCGCZFPBPHZCZJLPYYGGDTGWDCFCZQYYYQYSSCLXZSKLZZZGFFCQNWGLHQYZJJCZLQZZYJPJZZBPDCCMHJGXDQDGDLZQMFGPSYTSDYFWWDJZJYSXYYCZCYHZWPBYKXRYLYBHKJKSFXTZJMMCKHLLTNYYMSYXYZPYJQYCSYCWMTJJKQYRHLLQXPSGTLYYCLJSCPXJYZFNMLRGJJTYZBXYZMSJYJHHFZQMSYXRSZCWTLRTQZSSTKXGQKGSPTGCZNJSJCQCXHMXGGZTQYDJKZDLBZSXJLHYQGGGTHQSZPYHJHHGYYGKGGCWJZZYLCZLXQSFTGZSLLLMLJSKCTBLLZZSZMMNYTPZSXQHJCJYQXYZXZQZCPSHKZZYSXCDFGMWQRLLQXRFZTLYSTCTMJCXJJXHJNXTNRZTZFQYHQGLLGCXSZSJDJLJCYDSJTLNYXHSZXCGJZYQPYLFHDJSBPCCZHJJJQZJQDYBSSLLCMYTTMQTBHJQNNYGKYRQYQMZGCJKPDCGMYZHQLLSLLCLMHOLZGDYYFZSLJCQZLYLZQJESHNYLLJXGJXLYSYYYXNBZLJSSZCQQCJYLLZLTJYLLZLLBNYLGQCHXYYXOXCXQKYJXXXYKLXSXXYQXCYKQXQCSGYXXYQXYGYTQOHXHXPYXXXULCYEYCHZZCBWQBBWJQZSCSZSSLZYLKDESJZWMYMCYTSDSXXSCJPQQSQYLYYZYCMDJDZYWCBTJSYDJKCYDDJLBDJJSODZYSYXQQYXDHHGQQYQHDYXWGMMMAJDYBBBPPBCMUUPLJZSMTXERXJMHQNUTPJDCBSSMSSSTKJTSSMMTRCPLZSZMLQDSDMJMQPNQDXCFYNBFSDQXYXHYAYKQYDDLQYYYSSZBYDSLNTFQTZQPZMCHDHCZCWFDXTMYQSPHQYYXSRGJCWTJTZZQMGWJJTJHTQJBBHWZPXXHYQFXXQYWYYHYSCDYDHHQMNMTMWCPBSZPPZZGLMZFOLLCFWHMMSJZTTDHZZYFFYTZZGZYSKYJXQYJZQBHMBZZLYGHGFMSHPZFZSNCLPBQSNJXZSLXXFPMTYJYGBXLLDLXPZJYZJYHHZCYWHJYLSJEXFSZZYWXKZJLUYDTMLYMQJPWXYHXSKTQJEZRPXXZHHMHWQPWQLYJJQJJZSZCPHJLCHHNXJLQWZJHBMZYXBDHHYPZLHLHLGFWLCHYYTLHJXCJMSCPXSTKPNHQXSRTYXXTESYJCTLSSLSTDLLLWWYHDHRJZSFGXTSYCZYNYHTDHWJSLHTZDQDJZXXQHGYLTZPHCSQFCLNJTCLZPFSTPDYNYLGMJLLYCQHYSSHCHYLHQYQTMZYPBYWRFQYKQSYSLZDQJMPXYYSSRHZJNYWTQDFZBWWTWWRXCWHGYHXMKMYYYQMSMZHNGCEPMLQQMTCWCTMMPXJPJJHFXYYZSXZHTYBMSTSYJTTQQQYYLHYNPYQZLCYZHZWSMYLKFJXLWGXYPJYTYSYXYMZCKTTWLKSMZSYLMPWLZWXWQZSSAQSYXYRHSSNTSRAPXCPWCMGDXHXZDZYFJHGZTTSBJHGYZSZYSMYCLLLXBTYXHBBZJKSSDMALXHYCFYGMQYPJYCQXJLLLJGSLZGQLYCJCCZOTYXMTMTTLLWTGPXYMZMKLPSZZZXHKQYSXCTYJZYHXSHYXZKXLZWPSQPYHJWPJPWXQQYLXSDHMRSLZZYZWTTCYXYSZZSHBSCCSTPLWSSCJCHNLCGCHSSPHYLHFHHXJSXYLLNYLSZDHZXYLSXLWZYKCLDYAXZCMDDYSPJTQJZLNWQPSSSWCTSTSZLBLNXSMNYYMJQBQHRZWTYYDCHQLXKPZWBGQYBKFCMZWPZLLYYLSZYDWHXPSBCMLJBSCGBHXLQHYRLJXYSWXWXZSLDFHLSLYNJLZYFLYJYCDRJLFSYZFSLLCQYQFGJYHYXZLYLMSTDJCYHBZLLNWLXXYGYYHSMGDHXXHHLZZJZXCZZZCYQZFNGWPYLCPKPYYPMCLQKDGXZGGWQBDXZZKZFBXXLZXJTPJPTTBYTSZZDWSLCHZHSLTYXHQLHYXXXYYZYSWTXZKHLXZXZPYHGCHKCFSYHUTJRLXFJXPTZTWHPLYXFCRHXSHXKYXXYHZQDXQWULHYHMJTBFLKHTXCWHJFWJCFPQRYQXCYYYQYGRPYWSGSUNGWCHKZDXYFLXXHJJBYZWTSXXNCYJJYMSWZJQRMHXZWFQSYLZJZGBHYNSLBGTTCSYBYXXWXYHXYYXNSQYXMQYWRGYQLXBBZLJSYLPSYTJZYHYZAWLRORJMKSCZJXXXYXCHDYXRYXXJDTSQFXLYLTSFFYXLMTYJMJUYYYXLTZCSXQZQHZXLYYXZHDNBRXXXJCTYHLBRLMBRLLAXKYLLLJLYXXLYCRYLCJTGJCMTLZLLCYZZPZPCYAWHJJFYBDYYZSMPCKZDQYQPBPCJPDCYZMDPBCYYDYCNNPLMTMLRMFMMGWYZBSJGYGSMZQQQZTXMKQWGXLLPJGZBQCDJJJFPKJKCXBLJMSWMDTQJXLDLPPBXCWRCQFBFQJCZAHZGMYKPHYYHZYKNDKZMBPJYXPXYHLFPNYYGXJDBKXNXHJMZJXSTRSTLDXSKZYSYBZXJLXYSLBZYSLHXJPFXPQNBYLLJQKYGZMCYZZYMCCSLCLHZFWFWYXZMWSXTYNXJHPYYMCYSPMHYSMYDYSHQYZCHMJJMZCAAGCFJBBHPLYZYLXXSDJGXDHKXXTXXNBHRMLYJSLTXMRHNLXQJXYZLLYSWQGDLBJHDCGJYQYCMHWFMJYBMBYJYJWYMDPWHXQLDYGPDFXXBCGJSPCKRSSYZJMSLBZZJFLJJJLGXZGYXYXLSZQYXBEXYXHGCXBPLDYHWETTWWCJMBTXCHXYQXLLXFLYXLLJLSSFWDPZSMYJCLMWYTCZPCHQEKCQBWLCQYDPLQPPQZQFJQDJHYMMCXTXDRMJWRHXCJZYLQXDYYNHYYHRSLSRSYWWZJYMTLTLLGTQCJZYABTCKZCJYCCQLJZQXALMZYHYWLWDXZXQDLLQSHGPJFJLJHJABCQZDJGTKHSSTCYJLPSWZLXZXRWGLDLZRLZXTGSLLLLZLYXXWGDZYGBDPHZPBRLWSXQBPFDWOFMWHLYPCBJCCLDMBZPBZZLCYQXLDOMZBLZWPDWYYGDSTTHCSQSCCRSSSYSLFYBFNTYJSZDFNDPDHDZZMBBLSLCMYFFGTJJQWFTMTPJWFNLBZCMMJTGBDZLQLPYFHYYMJYLSDCHDZJWJCCTLJCLDTLJJCPDDSQDSSZYBNDBJLGGJZXSXNLYCYBJXQYCBYLZCFZPPGKCXZDZFZTJJFJSJXZBNZYJQTTYJYHTYCZHYMDJXTTMPXSPLZCDWSLSHXYPZGTFMLCJTYCBPMGDKWYCYZCDSZZYHFLYCTYGWHKJYYLSJCXGYWJCBLLCSNDDBTZBSCLYZCZZSSQDLLMQYYHFSLQLLXFTYHABXGWNYWYYPLLSDLDLLBJCYXJZMLHLJDXYYQYTDLLLBUGBFDFBBQJZZMDPJHGCLGMJJPGAEHHBWCQXAXHHHZCHXYPHJAXHLPHJPGPZJQCQZGJJZZUZDMQYYBZZPHYHYBWHAZYJHYKFGDPFQSDLZMLJXKXGALXZDAGLMDGXMWZQYXXDXXPFDMMSSYMPFMDMMKXKSYZYSHDZKXSYSMMZZZMSYDNZZCZXFPLSTMZDNMXCKJMZTYYMZMZZMSXHHDCZJEMXXKLJSTLWLSQLYJZLLZJSSDPPMHNLZJCZYHMXXHGZCJMDHXTKGRMXFWMCGMWKDTKSXQMMMFZZYDKMSCLCMPCGMHSPXQPZDSSLCXKYXTWLWJYAHZJGZQMCSNXYYMMPMLKJXMHLMLQMXCTKZMJQYSZJSYSZHSYJZJCDAJZYBSDQJZGWZQQXFKDMSDJLFWEHKZQKJPEYPZYSZCDWYJFFMZZYLTTDZZEFMZLBNPPLPLPEPSZALLTYLKCKQZKGENQLWAGYXYDPXLHSXQQWQCQXQCLHYXXMLYCCWLYMQYSKGCHLCJNSZKPYZKCQZQLJPDMDZHLASXLBYDWQLWDNBQCRYDDZTJYBKBWSZDXDTNPJDTCTQDFXQQMGNXECLTTBKPWSLCTYQLPWYZZKLPYGZCQQPLLKCCYLPQMZCZQCLJSLQZDJXLDDHPZQDLJJXZQDXYZQKZLJCYQDYJPPYPQYKJYRMPCBYMCXKLLZLLFQPYLLLMBSGLCYSSLRSYSQTMXYXZQZFDZUYSYZTFFMZZSMZQHZSSCCMLYXWTPZGXZJGZGSJSGKDDHTQGGZLLBJDZLCBCHYXYZHZFYWXYZYMSDBZZYJGTSMTFXQYXQSTDGSLNXDLRYZZLRYYLXQHTXSRTZNGZXBNQQZFMYKMZJBZYMKBPNLYZPBLMCNQYZZZSJZHJCTZKHYZZJRDYZHNPXGLFZTLKGJTCTSSYLLGZRZBBQZZKLPKLCZYSSUYXBJFPNJZZXCDWXZYJXZZDJJKGGRSRJKMSMZJLSJYWQSKYHQJSXPJZZZLSNSHRNYPZTWCHKLPSRZLZXYJQXQKYSJYCZTLQZYBBYBWZPQDWWYZCYTJCJXCKCWDKKZXSGKDZXWWYYJQYYTCYTDLLXWKCZKKLCCLZCQQDZLQLCSFQCHQHSFSMQZZLNBJJZBSJHTSZDYSJQJPDLZCDCWJKJZZLPYCGMZWDJJBSJQZSYZYHHXJPBJYDSSXDZNCGLQMBTSFSBPDZDLZNFGFJGFSMPXJQLMBLGQCYYXBQKDJJQYRFKZTJDHCZKLBSDZCFJTPLLJGXHYXZCSSZZXSTJYGKGCKGYOQXJPLZPBPGTGYJZGHZQZZLBJLSQFZGKQQJZGYCZBZQTLDXRJXBSXXPZXHYZYCLWDXJJHXMFDZPFZHQHQMQGKSLYHTYCGFRZGNQXCLPDLBZCSCZQLLJBLHBZCYPZZPPDYMZZSGYHCKCPZJGSLJLNSCDSLDLXBMSTLDDFJMKDJDHZLZXLSZQPQPGJLLYBDSZGQLBZLSLKYYHZTTNTJYQTZZPSZQZTLLJTYYLLQLLQYZQLBDZLSLYYZYMDFSZSNHLXZNCZQZPBWSKRFBSYZMTHBLGJPMCZZLSTLXSHTCSYZLZBLFEQHLXFLCJLYLJQCBZLZJHHSSTBRMHXZHJZCLXFNBGXGTQJCZTMSFZKJMSSNXLJKBHSJXNTNLZDNTLMSJXGZJYJCZXYJYJWRWWQNZTNFJSZPZSHZJFYRDJSFSZJZBJFZQZZHZLXFYSBZQLZSGYFTZDCSZXZJBQMSZKJRHYJZCKMJKHCHGTXKXQGLXPXFXTRTYLXJXHDTSJXHJZJXZWZLCQSBTXWXGXTXXHXFTSDKFJHZYJFJXRZSDLLLTQSQQZQWZXSYQTWGWBZCGZLLYZBCLMQQTZHZXZXLJFRMYZFLXYSQXXJKXRMQDZDMMYYBSQBHGZMWFWXGMXLZPYYTGZYCCDXYZXYWGSYJYZNBHPZJSQSYXSXRTFYZGRHZTXSZZTHCBFCLSYXZLZQMZLMPLMXZJXSFLBYZMYQHXJSXRXSQZZZSSLYFRCZJRCRXHHZXQYDYHXSJJHZCXZBTYNSYSXJBQLPXZQPYMLXZKYXLXCJLCYSXXZZLXDLLLJJYHZXGYJWKJRWYHCPSGNRZLFZWFZZNSXGXFLZSXZZZBFCSYJDBRJKRDHHGXJLJJTGXJXXSTJTJXLYXQFCSGSWMSBCTLQZZWLZZKXJMLTMJYHSDDBXGZHDLBMYJFRZFSGCLYJBPMLYSMSXLSZJQQHJZFXGFQFQBPXZGYYQXGZTCQWYLTLGWSGWHRLFSFGZJMGMGBGTJFSYZZGZYZAFLSSPMLPFLCWBJZCLJJMZLPJJLYMQDMYYYFBGYGYZMLYZDXQYXRQQQHSYYYQXYLJTYXFSFSLLGNQCYHYCWFHCCCFXPYLYPLLZYXXXXXKQHHXSHJZCFZSCZJXCPZWHHHHHAPYLQALPQAFYHXDYLUKMZQGGGDDESRNNZLTZGCHYPPYSQJJHCLLJTOLNJPZLJLHYMHEYDYDSQYCDDHGZUNDZCLZYZLLZNTNYZGSLHSLPJJBDGWXPCDUTJCKLKCLWKLLCASSTKZZDNQNTTLYYZSSYSSZZRYLJQKCQDHHCRXRZYDGRGCWCGZQFFFPPJFZYNAKRGYWYQPQXXFKJTSZZXSWZDDFBBXTBGTZKZNPZZPZXZPJSZBMQHKCYXYLDKLJNYPKYGHGDZJXXEAHPNZKZTZCMXCXMMJXNKSZQNMNLWBWWXJKYHCPSTMCSQTZJYXTPCTPDTNNPGLLLZSJLSPBLPLQHDTNJNLYYRSZFFJFQWDPHZDWMRZCCLODAXNSSNYZRESTYJWJYJDBCFXNMWTTBYLWSTSZGYBLJPXGLBOCLHPCBJLTMXZLJYLZXCLTPNCLCKXTPZJSWCYXSFYSZDKNTLBYJCYJLLSTGQCBXRYZXBXKLYLHZLQZLNZCXWJZLJZJNCJHXMNZZGJZZXTZJXYCYYCXXJYYXJJXSSSJSTSSTTPPGQTCSXWZDCSYFPTFBFHFBBLZJCLZZDBXGCXLQPXKFZFLSYLTUWBMQJHSZBMDDBCYSCCLDXYCDDQLYJJWMQLLCSGLJJSYFPYYCCYLTJANTJJPWYCMMGQYYSXDXQMZHSZXPFTWWZQSWQRFKJLZJQQYFBRXJHHFWJJZYQAZMYFRHCYYBYQWLPEXCCZSTYRLTTDMQLYKMBBGMYYJPRKZNPBSXYXBHYZDJDNGHPMFSGMWFZMFQMMBCMZZCJJLCNUXYQLMLRYGQZCYXZLWJGCJCGGMCJNFYZZJHYCPRRCMTZQZXHFQGTJXCCJEAQCRJYHPLQLSZDJRBCQHQDYRHYLYXJSYMHZYDWLDFRYHBPYDTSSCNWBXGLPZMLZZTQSSCPJMXXYCSJYTYCGHYCJWYRXXLFEMWJNMKLLSWTXHYYYNCMMCWJDQDJZGLLJWJRKHPZGGFLCCSCZMCBLTBHBQJXQDSPDJZZGKGLFQYWBZYZJLTSTDHQHCTCBCHFLQMPWDSHYYTQWCNZZJTLBYMBPDYYYXSQKXWYYFLXXNCWCXYPMAELYKKJMZZZBRXYYQJFLJPFHHHYTZZXSGQQMHSPGDZQWBWPJHZJDYSCQWZKTXXSQLZYYMYSDZGRXCKKUJLWPYSYSCSYZLRMLQSYLJXBCXTLWDQZPCYCYKPPPNSXFYZJJRCEMHSZMSXLXGLRWGCSTLRSXBZGBZGZTCPLUJLSLYLYMTXMTZPALZXPXJTJWTCYYZLBLXBZLQMYLXPGHDSLSSDMXMBDZZSXWHAMLCZCPJMCNHJYSNSYGCHSKQMZZQDLLKABLWJXSFMOCDXJRRLYQZKJMYBYQLYHETFJZFRFKSRYXFJTWDSXXSYSQJYSLYXWJHSNLXYYXHBHAWHHJZXWMYLJCSSLKYDZTXBZSYFDXGXZJKHSXXYBSSXDPYNZWRPTQZCZENYGCXQFJYKJBZMLJCMQQXUOXSLYXXLYLLJDZBTYMHPFSTTQQWLHOKYBLZZALZXQLHZWRRQHLSTMYPYXJJXMQSJFNBXYXYJXXYQYLTHYLQYFMLKLJTMLLHSZWKZHLJMLHLJKLJSTLQXYLMBHHLNLZXQJHXCFXXLHYHJJGBYZZKBXSCQDJQDSUJZYYHZHHMGSXCSYMXFEBCQWWRBPYYJQTYZCYQYQQZYHMWFFHGZFRJFCDPXNTQYZPDYKHJLFRZXPPXZDBBGZQSTLGDGYLCQMLCHHMFYWLZYXKJLYPQHSYWMQQGQZMLZJNSQXJQSYJYCBEHSXFSZPXZWFLLBCYYJDYTDTHWZSFJMQQYJLMQXXLLDTTKHHYBFPWTYYSQQWNQWLGWDEBZWCMYGCULKJXTMXMYJSXHYBRWFYMWFRXYQMXYSZTZZTFYKMLDHQDXWYYNLCRYJBLPSXCXYWLSPRRJWXHQYPHTYDNXHHMMYWYTZCSQMTSSCCDALWZTCPQPYJLLQZYJSWXMZZMMYLMXCLMXCZMXMZSQTZPPQQBLPGXQZHFLJJHYTJSRXWZXSCCDLXTYJDCQJXSLQYCLZXLZZXMXQRJMHRHZJBHMFLJLMLCLQNLDXZLLLPYPSYJYSXCQQDCMQJZZXHNPNXZMEKMXHYKYQLXSXTXJYYHWDCWDZHQYYBGYBCYSCFGPSJNZDYZZJZXRZRQJJYMCANYRJTLDPPYZBSTJKXXZYPFDWFGZZRPYMTNGXZQBYXNBUFNQKRJQZMJEGRZGYCLKXZDSKKNSXKCLJSPJYYZLQQJYBZSSQLLLKJXTBKTYLCCDDBLSPPFYLGYDTZJYQGGKQTTFZXBDKTYYHYBBFYTYYBCLPDYTGDHRYRNJSPTCSNYJQHKLLLZSLYDXXWBCJQSPXBPJZJCJDZFFXXBRMLAZHCSNDLBJDSZBLPRZTSWSBXBCLLXXLZDJZSJPYLYXXYFTFFFBHJJXGBYXJPMMMPSSJZJMTLYZJXSWXTYLEDQPJMYGQZJGDJLQJWJQLLSJGJGYGMSCLJJXDTYGJQJQJCJZCJGDZZSXQGSJGGCXHQXSNQLZZBXHSGZXCXYLJXYXYYDFQQJHJFXDHCTXJYRXYSQTJXYEFYYSSYYJXNCYZXFXMSYSZXYYSCHSHXZZZGZZZGFJDLTYLNPZGYJYZYYQZPBXQBDZTZCZYXXYHHSQXSHDHGQHJHGYWSZTMZMLHYXGEBTYLZKQWYTJZRCLEKYSTDBCYKQQSAYXCJXWWGSBHJYZYDHCSJKQCXSWXFLTYNYZPZCCZJQTZWJQDZZZQZLJJXLSBHPYXXPSXSHHEZTXFPTLQYZZXHYTXNCFZYYHXGNXMYWXTZSJPTHHGYMXMXQZXTSBCZYJYXXTYYZYPCQLMMSZMJZZLLZXGXZAAJZYXJMZXWDXZSXZDZXLEYJJZQBHZWZZZQTZPSXZTDSXJJJZNYAZPHXYYSRNQDTHZHYYKYJHDZXZLSWCLYBZYECWCYCRYLCXNHZYDZYDYJDFRJJHTRSQTXYXJRJHOJYNXELXSFSFJZGHPZSXZSZDZCQZBYYKLSGSJHCZSHDGQGXYZGXCHXZJWYQWGYHKSSEQZZNDZFKWYSSTCLZSTSYMCDHJXXYWEYXCZAYDMPXMDSXYBSQMJMZJMTZQLPJYQZCGQHXJHHLXXHLHDLDJQCLDWBSXFZZYYSCHTYTYYBHECXHYKGJPXHHYZJFXHWHBDZFYZBCAPNPGNYDMSXHMMMMAMYNBYJTMPXYYMCTHJBZYFCGTYHWPHFTWZZEZSBZEGPFMTSKFTYCMHFLLHGPZJXZJGZJYXZSBBQSCZZLZCCSTPGXMJSFTCCZJZDJXCYBZLFCJSYZFGSZLYBCWZZBYZDZYPSWYJZXZBDSYUXLZZBZFYGCZXBZHZFTPBGZGEJBSTGKDMFHYZZJHZLLZZGJQZLSFDJSSCBZGPDLFZFZSZYZYZSYGCXSNXXCHCZXTZZLJFZGQSQYXZJQDCCZTQCDXZJYQJQCHXZTDLGSCXZSYQJQTZWLQDQZTQCHQQJZYEZZZPBWKDJFCJPZTYPQYQTTYNLMBDKTJZPQZQZZFPZSBNJLGYJDXJDZZKZGQKXDLPZJTCJDQBXDJQJSTCKNXBXZMSLYJCQMTJQWWCJQNJNLLLHJCWQTBZQYDZCZPZZDZYDDCYZZZCCJTTJFZDPRRTZTJDCQTQZDTJNPLZBCLLCTZSXKJZQZPZLBZRBTJDCXFCZDBCCJJLTQQPLDCGZDBBZJCQDCJWYNLLZYZCCDWLLXWZLXRXNTQQCZXKQLSGDFQTDDGLRLAJJTKUYMKQLLTZYTDYYCZGJWYXDXFRSKSTQTENQMRKQZHHQKDLDAZFKYPBGGPZREBZZYKZZSPEGJXGYKQZZZSLYSYYYZWFQZYLZZLZHWCHKYPQGNPGBLPLRRJYXCCSYYHSFZFYBZYYTGZXYLXCZWXXZJZBLFFLGSKHYJZEYJHLPLLLLCZGXDRZELRHGKLZZYHZLYQSZZJZQLJZFLNBHGWLCZCFJYSPYXZLZLXGCCPZBLLCYBBBBUBBCBPCRNNZCZYRBFSRLDCGQYYQXYGMQZWTZYTYJXYFWTEHZZJYWLCCNTZYJJZDEDPZDZTSYQJHDYMBJNYJZLXTSSTPHNDJXXBYXQTZQDDTJTDYYTGWSCSZQFLSHLGLBCZPHDLYZJYCKWTYTYLBNYTSDSYCCTYSZYYEBHEXHQDTWNYGYCLXTSZYSTQMYGZAZCCSZZDSLZCLZRQXYYELJSBYMXSXZTEMBBLLYYLLYTDQYSHYMRQWKFKBFXNXSBYCHXBWJYHTQBPBSBWDZYLKGZSKYHXQZJXHXJXGNLJKZLYYCDXLFYFGHLJGJYBXQLYBXQPQGZTZPLNCYPXDJYQYDYMRBESJYYHKXXSTMXRCZZYWXYQYBMCLLYZHQYZWQXDBXBZWZMSLPDMYSKFMZKLZCYQYCZLQXFZZYDQZPZYGYJYZMZXDZFYFYTTQTZHGSPCZMLCCYTZXJCYTJMKSLPZHYSNZLLYTPZCTZZCKTXDHXXTQCYFKSMQCCYYAZHTJPCYLZLYJBJXTPNYLJYYNRXSYLMMNXJSMYBCSYSYLZYLXJJQYLDZLPQBFZZBLFNDXQKCZFYWHGQMRDSXYCYTXNQQJZYYPFZXDYZFPRXEJDGYQBXRCNFYYQPGHYJDYZXGRHTKYLNWDZNTSMPKLBTHBPYSZBZTJZSZZJTYYXZPHSSZZBZCZPTQFZMYFLYPYBBJQXZMXXDJMTSYSKKBJZXHJCKLPSMKYJZCXTMLJYXRZZQSLXXQPYZXMKYXXXJCLJPRMYYGADYSKQLSNDHYZKQXZYZTCGHZTLMLWZYBWSYCTBHJHJFCWZTXWYTKZLXQSHLYJZJXTMPLPYCGLTBZZTLZJCYJGDTCLKLPLLQPJMZPAPXYZLKKTKDZCZZBNZDYDYQZJYJGMCTXLTGXSZLMLHBGLKFWNWZHDXUHLFMKYSLGXDTWWFRJEJZTZHYDXYKSHWFZCQSHKTMQQHTZHYMJDJSKHXZJZBZZXYMPAGQMSTPXLSKLZYNWRTSQLSZBPSPSGZWYHTLKSSSWHZZLYYTNXJGMJSZSUFWNLSOZTXGXLSAMMLBWLDSZYLAKQCQCTMYCFJBSLXCLZZCLXXKSBZQCLHJPSQPLSXXCKSLNHPSFQQYTXYJZLQLDXZQJZDYYDJNZPTUZDSKJFSLJHYLZSQZLBTXYDGTQFDBYAZXDZHZJNHHQBYKNXJJQCZMLLJZKSPLDYCLBBLXKLELXJLBQYCXJXGCNLCQPLZLZYJTZLJGYZDZPLTQCSXFDMNYCXGBTJDCZNBGBQYQJWGKFHTNPYQZQGBKPBBYZMTJDYTBLSQMPSXTBNPDXKLEMYYCJYNZCTLDYKZZXDDXHQSHDGMZSJYCCTAYRZLPYLTLKXSLZCGGEXCLFXLKJRTLQJAQZNCMBYDKKCXGLCZJZXJHPTDJJMZQYKQSECQZDSHHADMLZFMMZBGNTJNNLGBYJBRBTMLBYJDZXLCJLPLDLPCQDHLXZLYCBLCXZZJADJLNZMMSSSMYBHBSQKBHRSXXJMXSDZNZPXLGBRHWGGFCXGMSKLLTSJYYCQLTSKYWYYHYWXBXQYWPYWYKQLSQPTNTKHQCWDQKTWPXXHCPTHTWUMSSYHBWCRWXHJMKMZNGWTMLKFGHKJYLSYYCXWHYECLQHKQHTTQKHFZLDXQWYZYYDESBPKYRZPJFYYZJCEQDZZDLATZBBFJLLCXDLMJSSXEGYGSJQXCWBXSSZPDYZCXDNYXPPZYDLYJCZPLTXLSXYZYRXCYYYDYLWWNZSAHJSYQYHGYWWAXTJZDAXYSRLTDPSSYYFNEJDXYZHLXLLLZQZSJNYQYQQXYJGHZGZCYJCHZLYCDSHWSHJZYJXCLLNXZJJYYXNFXMWFPYLCYLLABWDDHWDXJMCXZTZPMLQZHSFHZYNZTLLDYWLSLXHYMMYLMBWWKYXYADTXYLLDJPYBPWUXJMWMLLSAFDLLYFLBHHHBQQLTZJCQJLDJTFFKMMMBYTHYGDCQRDDWRQJXNBYSNWZDBYYTBJHPYBYTTJXAAHGQDQTMYSTQXKBTZPKJLZRBEQQSSMJJBDJOTGTBXPGBKTLHQXJJJCTHXQDWJLWRFWQGWSHCKRYSWGFTGYGBXSDWDWRFHWYTJJXXXJYZYSLPYYYPAYXHYDQKXSHXYXGSKQHYWFDDDPPLCJLQQEEWXKSYYKDYPLTJTHKJLTCYYHHJTTPLTZZCDLTHQKZXQYSTEEYWYYZYXXYYSTTJKLLPZMCYHQGXYHSRMBXPLLNQYDQHXSXXWGDQBSHYLLPJJJTHYJKYPPTHYYKTYEZYENMDSHLCRPQFDGFXZPSFTLJXXJBSWYYSKSFLXLPPLBBBLBSFXFYZBSJSSYLPBBFFFFSSCJDSTZSXZRYYSYFFSYZYZBJTBCTSBSDHRTJJBYTCXYJEYLXCBNEBJDSYXYKGSJZBXBYTFZWGENYHHTHZHHXFWGCSTBGXKLSXYWMTMBYXJSTZSCDYQRCYTWXZFHMYMCXLZNSDJTTTXRYCFYJSBSDYERXJLJXBBDEYNJGHXGCKGSCYMBLXJMSZNSKGXFBNBPTHFJAAFXYXFPXMYPQDTZCXZZPXRSYWZDLYBBKTYQPQJPZYPZJZNJPZJLZZFYSBTTSLMPTZRTDXQSJEHBZYLZDHLJSQMLHTXTJECXSLZZSPKTLZKQQYFSYGYWPCPQFHQHYTQXZKRSGTTSQCZLPTXCDYYZXSQZSLXLZMYCPCQBZYXHBSXLZDLTCDXTYLZJYYZPZYZLTXJSJXHLPMYTXCQRBLZSSFJZZTNJYTXMYJHLHPPLCYXQJQQKZZSCPZKSWALQSBLCCZJSXGWWWYGYKTJBBZTDKHXHKGTGPBKQYSLPXPJCKBMLLXDZSTBKLGGQKQLSBKKTFXRMDKBFTPZFRTBBRFERQGXYJPZSSTLBZTPSZQZSJDHLJQLZBPMSMMSXLQQNHKNBLRDDNXXDHDDJCYYGYLXGZLXSYGMQQGKHBPMXYXLYTQWLWGCPBMQXCYZYDRJBHTDJYHQSHTMJSBYPLWHLZFFNYPMHXXHPLTBQPFBJWQDBYGPNZTPFZJGSDDTQSHZEAWZZYLLTYYBWJKXXGHLFKXDJTMSZSQYNZGGSWQSPHTLSSKMCLZXYSZQZXNCJDQGZDLFNYKLJCJLLZLMZZNHYDSSHTHZZLZZBBHQZWWYCRZHLYQQJBEYFXXXWHSRXWQHWPSLMSSKZTTYGYQQWRSLALHMJTQJSMXQBJJZJXZYZKXBYQXBJXSHZTSFJLXMXZXFGHKZSZGGYLCLSARJYHSLLLMZXELGLXYDJYTLFBHBPNLYZFBBHPTGJKWETZHKJJXZXXGLLJLSTGSHJJYQLQZFKCGNNDJSSZFDBCTWWSEQFHQJBSAQTGYPQLBXBMMYWXGSLZHGLZGQYFLZBYFZJFRYSFMBYZHQGFWZSYFYJJPHZBYYZFFWODGRLMFTWLBZGYCQXCDJYGZYYYYTYTYDWEGAZYHXJLZYYHLRMGRXXZCLHNELJJTJTPWJYBJJBXJJTJTEEKHWSLJPLPSFYZPQQBDLQJJTYYQLYZKDKSQJYYQZLDQTGJQYZJSUCMRYQTHTEJMFCTYHYPKMHYZWJDQFHYYXWSHCTXRLJHQXHCCYYYJLTKTTYTMXGTCJTZAYYOCZLYLBSZYWJYTSJYHBYSHFJLYGJXXTMZYYLTXXYPZLXYJZYZYYPNHMYMDYYLBLHLSYYQQLLNJJYMSOYQBZGDLYXYLCQYXTSZEGXHZGLHWBLJHEYXTWQMAKBPQCGYSHHEGQCMWYYWLJYJHYYZLLJJYLHZYHMGSLJLJXCJJYCLYCJPCPZJZJMMYLCQLNQLJQJSXYJMLSZLJQLYCMMHCFMMFPQQMFYLQMCFFQMMMMHMZNFHHJGTTHHKHSLNCHHYQDXTMMQDCYZYXYQMYQYLTDCYYYZAZZCYMZYDLZFFFMMYCQZWZZMABTBYZTDMNZZGGDFTYPCGQYTTSSFFWFDTZQSSYSTWXJHXYTSXXYLBYQHWWKXHZXWZNNZZJZJJQJCCCHYYXBZXZCYZTLLCQXYNJYCYYCYNZZQYYYEWYCZDCJYCCHYJLBTZYYCQWMPWPYMLGKDLDLGKQQBGYCHJXY";
+		//此处收录了375个多音字,数据来自于http://www.51window.net/page/pinyin
+		var oMultiDiff={"19969":"DZ","19975":"WM","19988":"QJ","20048":"YL","20056":"SC","20060":"NM","20094":"QG","20127":"QJ","20167":"QC","20193":"YG","20250":"KH","20256":"ZC","20282":"SC","20285":"QJG","20291":"TD","20314":"YD","20340":"NE","20375":"TD","20389":"YJ","20391":"CZ","20415":"PB","20446":"YS","20447":"SQ","20504":"TC","20608":"KG","20854":"QJ","20857":"ZC","20911":"PF","20504":"TC","20608":"KG","20854":"QJ","20857":"ZC","20911":"PF","20985":"AW","21032":"PB","21048":"XQ","21049":"SC","21089":"YS","21119":"JC","21242":"SB","21273":"SC","21305":"YP","21306":"QO","21330":"ZC","21333":"SDC","21345":"QK","21378":"CA","21397":"SC","21414":"XS","21442":"SC","21477":"JG","21480":"TD","21484":"ZS","21494":"YX","21505":"YX","21512":"HG","21523":"XH","21537":"PB","21542":"PF","21549":"KH","21571":"E","21574":"DA","21588":"TD","21589":"O","21618":"ZC","21621":"KHA","21632":"ZJ","21654":"KG","21679":"LKG","21683":"KH","21710":"A","21719":"YH","21734":"WOE","21769":"A","21780":"WN","21804":"XH","21834":"A","21899":"ZD","21903":"RN","21908":"WO","21939":"ZC","21956":"SA","21964":"YA","21970":"TD","22003":"A","22031":"JG","22040":"XS","22060":"ZC","22066":"ZC","22079":"MH","22129":"XJ","22179":"XA","22237":"NJ","22244":"TD","22280":"JQ","22300":"YH","22313":"XW","22331":"YQ","22343":"YJ","22351":"PH","22395":"DC","22412":"TD","22484":"PB","22500":"PB","22534":"ZD","22549":"DH","22561":"PB","22612":"TD","22771":"KQ","22831":"HB","22841":"JG","22855":"QJ","22865":"XQ","23013":"ML","23081":"WM","23487":"SX","23558":"QJ","23561":"YW","23586":"YW","23614":"YW","23615":"SN","23631":"PB","23646":"ZS","23663":"ZT","23673":"YG","23762":"TD","23769":"ZS","23780":"QJ","23884":"QK","24055":"XH","24113":"DC","24162":"ZC","24191":"GA","24273":"QJ","24324":"NL","24377":"TD","24378":"QJ","24439":"PF","24554":"ZS","24683":"TD","24694":"WE","24733":"LK","24925":"TN","25094":"ZG","25100":"XQ","25103":"XH","25153":"PB","25170":"PB","25179":"KG","25203":"PB","25240":"ZS","25282":"FB","25303":"NA","25324":"KG","25341":"ZY","25373":"WZ","25375":"XJ","25384":"A","25457":"A","25528":"SD","25530":"SC","25552":"TD","25774":"ZC","25874":"ZC","26044":"YW","26080":"WM","26292":"PB","26333":"PB","26355":"ZY","26366":"CZ","26397":"ZC","26399":"QJ","26415":"ZS","26451":"SB","26526":"ZC","26552":"JG","26561":"TD","26588":"JG","26597":"CZ","26629":"ZS","26638":"YL","26646":"XQ","26653":"KG","26657":"XJ","26727":"HG","26894":"ZC","26937":"ZS","26946":"ZC","26999":"KJ","27099":"KJ","27449":"YQ","27481":"XS","27542":"ZS","27663":"ZS","27748":"TS","27784":"SC","27788":"ZD","27795":"TD","27812":"O","27850":"PB","27852":"MB","27895":"SL","27898":"PL","27973":"QJ","27981":"KH","27986":"HX","27994":"XJ","28044":"YC","28065":"WG","28177":"SM","28267":"QJ","28291":"KH","28337":"ZQ","28463":"TL","28548":"DC","28601":"TD","28689":"PB","28805":"JG","28820":"QG","28846":"PB","28952":"TD","28975":"ZC","29100":"A","29325":"QJ","29575":"SL","29602":"FB","30010":"TD","30044":"CX","30058":"PF","30091":"YSP","30111":"YN","30229":"XJ","30427":"SC","30465":"SX","30631":"YQ","30655":"QJ","30684":"QJG","30707":"SD","30729":"XH","30796":"LG","30917":"PB","31074":"NM","31085":"JZ","31109":"SC","31181":"ZC","31192":"MLB","31293":"JQ","31400":"YX","31584":"YJ","31896":"ZN","31909":"ZY","31995":"XJ","32321":"PF","32327":"ZY","32418":"HG","32420":"XQ","32421":"HG","32438":"LG","32473":"GJ","32488":"TD","32521":"QJ","32527":"PB","32562":"ZSQ","32564":"JZ","32735":"ZD","32793":"PB","33071":"PF","33098":"XL","33100":"YA","33152":"PB","33261":"CX","33324":"BP","33333":"TD","33406":"YA","33426":"WM","33432":"PB","33445":"JG","33486":"ZN","33493":"TS","33507":"QJ","33540":"QJ","33544":"ZC","33564":"XQ","33617":"YT","33632":"QJ","33636":"XH","33637":"YX","33694":"WG","33705":"PF","33728":"YW","33882":"SR","34067":"WM","34074":"YW","34121":"QJ","34255":"ZC","34259":"XL","34425":"JH","34430":"XH","34485":"KH","34503":"YS","34532":"HG","34552":"XS","34558":"YE","34593":"ZL","34660":"YQ","34892":"XH","34928":"SC","34999":"QJ","35048":"PB","35059":"SC","35098":"ZC","35203":"TQ","35265":"JX","35299":"JX","35782":"SZ","35828":"YS","35830":"E","35843":"TD","35895":"YG","35977":"MH","36158":"JG","36228":"QJ","36426":"XQ","36466":"DC","36710":"JC","36711":"ZYG","36767":"PB","36866":"SK","36951":"YW","37034":"YX","37063":"XH","37218":"ZC","37325":"ZC","38063":"PB","38079":"TD","38085":"QY","38107":"DC","38116":"TD","38123":"YD","38224":"HG","38241":"XTC","38271":"ZC","38415":"YE","38426":"KH","38461":"YD","38463":"AE","38466":"PB","38477":"XJ","38518":"YT","38551":"WK","38585":"ZC","38704":"XS","38739":"LJ","38761":"GJ","38808":"SQ","39048":"JG","39049":"XJ","39052":"HG","39076":"CZ","39271":"XT","39534":"TD","39552":"TD","39584":"PB","39647":"SB","39730":"LG","39748":"TPB","40109":"ZQ","40479":"ND","40516":"HG","40536":"HG","40583":"QJ","40765":"YQ","40784":"QJ","40840":"YK","40863":"QJG"};
+		//参数,中文字符串
+		//返回值:拼音首字母串数组
+		function makePy(str){
+		if(typeof(str) != "string")
+		throw new Error(-1,"函数makePy需要字符串类型参数!");
+		var arrResult = new Array(); //保存中间结果的数组
+		for(var i=0,len=str.length;i<len;i++){
+		//获得unicode码
+		var ch = str.charAt(i);
+		//检查该unicode码是否在处理范围之内,在则返回该码对映汉字的拼音首字母,不在则调用其它函数处理
+		arrResult.push(checkCh(ch));
+		}
+		//处理arrResult,返回所有可能的拼音首字母串数组
+		return mkRslt(arrResult[0]);
+		}
+		function checkCh(ch){
+		var uni = ch.charCodeAt(0);
+		//如果不在汉字处理范围之内,返回原字符,也可以调用自己的处理函数
+		if(uni > 40869 || uni < 19968)
+		return ch; //dealWithOthers(ch);
+		//检查是否是多音字,是按多音字处理,不是就直接在strChineseFirstPY字符串中找对应的首字母
+		//return (oMultiDiff[uni]?oMultiDiff[uni]:(strChineseFirstPY.charAt(uni-19968)));
+		return strChineseFirstPY.charAt(uni-19968);
+		}
+		function mkRslt(arr){
+		var arrRslt = [""];
+		for(var i=0,len=arr.length;i<len;i++){
+		var str = arr[i];
+		var strlen = str.length;
+		if(strlen == 1){
+		for(var k=0;k<arrRslt.length;k++){
+		arrRslt[k] += str;
+		}
+		}else{
+		var tmpArr = arrRslt.slice(0);
+		arrRslt = [];
+		for(k=0;k<strlen;k++){
+		//复制一个相同的arrRslt
+		var tmp = tmpArr.slice(0);
+		//把当前字符str[k]添加到每个元素末尾
+		for(var j=0;j<tmp.length;j++){
+		tmp[j] += str.charAt(k);
+		}
+		//把复制并修改后的数组连接到arrRslt上
+		arrRslt = arrRslt.concat(tmp);
+		}
+		}
+		}
+		return arrRslt;
+		}
+		//两端去空格函数
+		String.prototype.trim = function() {    return this.replace(/(^\s*)|(\s*$)/g,""); }
+		//
+		function getPosition(obj) {
+		var top=0;
+		var left=0;
+		var width=obj.offsetWidth;
+		var height=obj.offsetHeight;
+		while (obj.offsetParent) {
+		top += obj.offsetTop;
+		left += obj.offsetLeft;
+		obj = obj.offsetParent;
+		}
+		return {"top":top,"left":left,"width":width,"height":height};
+		}
+		function query(){
+			var str = string.trim();
+			if(str == "") return;
+			var arrRslt = makePy(str);
+			return arrRslt[0];
+		}
+		return query();
+	}
+	//json数据排序
+	jsonSort(json,key){
+	    //console.log(json);
+	    for(var j=1,jl=json.length;j < jl;j++){
+	        var temp = json[j],
+	            val  = temp[key],
+	            i    = j-1;
+	        while(i >=0 && json[i][key]>val){
+	            json[i+1] = json[i];
+	            i = i-1;    
+	        }
+	        json[i+1] = temp;
+
+	    }
+	    //console.log(json);
+	    return json;
+	}
+	//用户权限
+    userPermissionLists(value,position) {
+        //value 是premissionNameId
+        var defaultVal = false;
+        var userPermissionList = JSON.parse(common.getStorage('session', 'userPermissionList'));
+        for (var i = 0, len = userPermissionList.length; i < len; i++) {
+            if (userPermissionList[i].premissionNameId == value) {
+                var premission=userPermissionList[i].premission;
+                //判断权限值
+                var v=premission.charAt(position)+"";
+                defaultVal = v==='1' ?  true :false;
+                return defaultVal;
+            }
+        }
+        return defaultVal;
+    }
+    isInJurisdnArr(value){
+        var defaultVal=false;
+        var jurisdnArrs=JSON.parse(this.getStorage('session','jurisdnArrs'));
+        for(var i=0,len=jurisdnArrs.length;i<len;i++){
+            if(jurisdnArrs[i]==value){
+                defaultVal=true;
+                return defaultVal;
+            }
+        }
+        return defaultVal;
+    }
+    // 不和规范的json 转换成符合规范的JSON
+	toJson(json) {
+		let copyJson = json;
+		if (!copyJson) return;
+		copyJson = copyJson.replace(/['‘“’”]/g, '"')
+		copyJson = copyJson.replace(/[，]/g, ',')
+
+		let arr = copyJson.match(/[\{,][\s\w_-]*?:/g)
+
+		for (let i = 0, len = arr.length; i < len; i++) {
+			if (arr[i].indexOf('{') != -1) {
+				let str1 = arr[i].match(/[\w-_]+/)
+				arr[i] = `{"${str1}":`
+			} else if (arr[i].indexOf(',') != -1) {
+				let str1 = arr[i].match(/[\w-_]+/)
+				arr[i] = `,"${str1}":`
+			}
+		}
+			copyJson = copyJson.replace(/[\{,][\s\w_-]*?:/g, '...')
+
+		for (let i = 0, len = arr.length; i < len; i++) {
+			copyJson = copyJson.replace(/\.\.\./, arr[i])
+		}
+
+		return copyJson
+	};
+}
+
+//初始化common对象
+module.exports=new common();
+
+
+
+
+
+

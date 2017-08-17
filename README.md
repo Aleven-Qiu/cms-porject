@@ -12,35 +12,8 @@
 
 ***
 
->- vue-loader/
-  + package.json //npm配置文件
-  + index.html //入口html
-  - node_modules //npm加载的模块
-  - build //webpack 配置文件
-    + webpack.base.config.js //基本配置
-    + webpack.dev.config.js //开发环境
-    + webpack.product.config.js //生产环境
-  - src //开发资源目录
-    - assets //一些资源
-      + css  
-      + js
-      + img
-    - components //vue组件
-      + home.vue 
-      + index.vue
-      + user.vue
-      + userDetails.vue
-  -vuex  //状态等管理
-    -actions  
-      +indexActions.js
-      ...
-    -modles
-      +indexModles.js
-      ...
-    +getters.js
-    +mutation-types.js
-    +store.js
-    + app.vue //布局文件
-    + main.js  //入口文件
-    + filter.js //vue的过滤器
-    + router.js //vue路由插件
+#项目步骤
+>安装node.js
+ 2.安装依赖:npm i
+ 3.npm run dev 浏览器访问：127.0.0.1:8333
+ 4.生产环境打包：npm run build
